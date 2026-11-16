@@ -1,6 +1,7 @@
 import os
 import sys
 import stat
+import json
 from eyed3 import main, version
 from . import RedirectStdStreams
 
@@ -56,6 +57,20 @@ def testJsonPlugin(audiofile):
   "_eyeD3": "%(version)s"
 }
 """)
+
+
+def testJsonPluginMultiValue(audiofile):
+    """Multi-value text frames are output as arrays; single values stay str."""
+    audiofile.initTag()
+    audiofile.tag.artist = "Artist A"
+    audiofile.tag.frame_set[b"TPE1"][0].texts = ["Artist A", "Artist B"]
+    audiofile.tag.title = "Suffer"
+    audiofile.tag.save()
+
+    output = _runPlugin(audiofile, "json")
+    data = json.loads(output)
+    assert data["artist"] == ["Artist A", "Artist B"]
+    assert data["title"] == "Suffer"
 
 
 def testYamlPlugin(audiofile):

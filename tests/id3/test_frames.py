@@ -114,6 +114,38 @@ class TextFrameTest(unittest.TestCase):
             assert f1.text == f2.text
             assert f1.encoding == f2.encoding
 
+    def testMultiValueRoundTrip(self):
+        """A v2.4 text frame with multiple, null separated, UTF-8 values must
+        parse into individual values and render byte-for-byte identically."""
+        frame_bytes = (b"TPE1"                    # frame id
+                       b"\x00\x00\x00\x12"        # syncsafe data size (18)
+                       b"\x00\x00"                # flags
+                       b"\x03"                    # UTF-8 encoding
+                       b"Artist A\x00Artist B")
+
+        frame = TextFrame(b"TPE1")
+        frame.parse(frame_bytes[10:], FrameHeader(b"TPE1", ID3_V2_4))
+
+        assert frame.encoding == UTF_8_ENCODING
+        assert frame.text == "Artist A"
+        assert frame.texts == ["Artist A", "Artist B"]
+        assert frame.render() == frame_bytes
+
+    def testMultiValueV23RendersJoined(self):
+        """Multi-value text frames render as a single ``/`` joined value when
+        targeting a version before 2.4."""
+        frame = TextFrame(b"TPE1")
+        frame.header = FrameHeader(b"TPE1", ID3_V2_3)
+        frame.texts = ["Artist A", "Artist B"]
+
+        rendered = frame.render()
+
+        # A v2.3 reader must see a single, "/" joined, value.
+        reparsed = TextFrame(b"TPE1")
+        reparsed.parse(rendered[10:], FrameHeader(b"TPE1", ID3_V2_3))
+        assert reparsed.text == "Artist A/Artist B"
+        assert reparsed.texts == ["Artist A/Artist B"]
+
 
 class ImageFrameTest(unittest.TestCase):
     def testPicTypeConversions(self):

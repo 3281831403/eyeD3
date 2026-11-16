@@ -1286,3 +1286,78 @@ def testRecordingDate_v23_issue517(id3tag, eyed3_version):
         assert id3tag.recording_date.year == d.year
         assert id3tag.recording_date.month is None
         assert id3tag.recording_date.day is None
+
+
+def testMultiValueTextFrames():
+    """Multi-value (v2.4) text frames are treated as multiple values."""
+    test_file = "/tmp/multivalue.id3"
+
+    tag = Tag()
+    tag.frame_set.setTextFrame(frames.ARTIST_FID, "Artist A")
+    tag.frame_set[frames.ARTIST_FID][0].texts = ["Artist A", "Artist B"]
+    tag.frame_set.setTextFrame(frames.GENRE_FID, "Rock")
+    tag.frame_set[frames.GENRE_FID][0].texts = ["Rock", "Pop"]
+
+    # Convenience properties return the first value (and no null bytes).
+    assert tag.artist == "Artist A"
+    assert tag.genre.name == "Rock"
+
+    try:
+        # Save as v2.4: values stay multiple and re-saving is byte identical.
+        tag.save(test_file)
+        with open(test_file, "rb") as fp:
+            orig_data = fp.read()
+
+        tag2 = eyed3.load(test_file).tag
+        assert tag2.version == ID3_V2_4
+        assert tag2.artist == "Artist A"
+        assert tag2.frame_set[frames.ARTIST_FID][0].texts == \
+            ["Artist A", "Artist B"]
+        assert tag2.frame_set[frames.GENRE_FID][0].texts == ["Rock", "Pop"]
+        assert tag2.genre.name == "Rock"
+
+        tag2.save(test_file)
+        with open(test_file, "rb") as fp:
+            assert fp.read() == orig_data
+
+        # Convert to v2.3: multiple values are joined with "/".
+        tag2.save(test_file, version=ID3_V2_3)
+        tag3 = eyed3.load(test_file).tag
+        assert tag3.version == ID3_V2_3
+        assert tag3.artist == "Artist A/Artist B"
+        assert tag3.frame_set[frames.ARTIST_FID][0].texts == \
+            ["Artist A/Artist B"]
+        assert tag3.genre.name == "Rock/Pop"
+
+        # Convert back to v2.4: "/" is part of the value, never re-split.
+        tag3.save(test_file, version=ID3_V2_4)
+        tag4 = eyed3.load(test_file).tag
+        assert tag4.version == ID3_V2_4
+        assert tag4.artist == "Artist A/Artist B"
+        assert tag4.frame_set[frames.ARTIST_FID][0].texts == \
+            ["Artist A/Artist B"]
+    finally:
+        if os.path.exists(test_file):
+            os.remove(test_file)
+
+
+def testMultiValueTextFrameAcDc():
+    """A v2.3 name containing "/" is not split when upgraded to v2.4."""
+    test_file = "/tmp/acdc.id3"
+
+    tag = Tag()
+    tag.artist = "AC/DC"
+    try:
+        tag.save(test_file, version=ID3_V2_3)
+        tag = eyed3.load(test_file).tag
+        assert tag.version == ID3_V2_3
+        assert tag.artist == "AC/DC"
+
+        tag.save(test_file, version=ID3_V2_4)
+        tag = eyed3.load(test_file).tag
+        assert tag.version == ID3_V2_4
+        assert tag.artist == "AC/DC"
+        assert tag.frame_set[frames.ARTIST_FID][0].texts == ["AC/DC"]
+    finally:
+        if os.path.exists(test_file):
+            os.remove(test_file)

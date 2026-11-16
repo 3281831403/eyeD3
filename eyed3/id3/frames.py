@@ -273,6 +273,12 @@ class Frame(object):
 class TextFrame(Frame):
     """Text frames.
     Data string format: encoding (one byte) + text
+
+    ID3 v2.4 text frames may contain multiple strings separated by a null
+    terminator (e.g. ``b"Artist 1\\x00Artist 2"``). These are exposed through
+    ``texts`` while ``text`` returns the first value. When rendering to a
+    version before 2.4 (which does not support multiple values) the values
+    are joined with ``/``.
     """
     @requireUnicode("text")
     def __init__(self, id, text=None):
@@ -283,12 +289,29 @@ class TextFrame(Frame):
 
     @property
     def text(self):
-        return self._text
+        return self._texts[0] if self._texts else ""
 
     @text.setter
     @requireUnicode(1)
     def text(self, txt):
-        self._text = txt
+        self._texts = [txt]
+
+    @property
+    def texts(self):
+        """The list of text values. ID3 v2.4 text frames may contain more
+        than one value; a frame parsed from (or rendered to) a version before
+        2.4 always has exactly one value."""
+        return list(self._texts)
+
+    @texts.setter
+    def texts(self, vals):
+        if isinstance(vals, str):
+            vals = [vals]
+        vals = list(vals)
+        for val in vals:
+            if not isinstance(val, str):
+                raise TypeError("texts values must be str")
+        self._texts = vals
 
     def parse(self, data, frame_header):
         super().parse(data, frame_header)
@@ -303,16 +326,31 @@ class TextFrame(Frame):
             text_data = self.data[:]
 
         try:
-            self.text = decodeUnicode(text_data, self.encoding)
+            text = decodeUnicode(text_data, self.encoding)
         except UnicodeDecodeError as err:
             log.warning(f"Error decoding text frame {self.id}: {err}")
-            self.text = ""
+            text = ""
+
+        if frame_header.minor_version == 4:
+            # ID3 v2.4 text frames may contain multiple, null separated,
+            # values.
+            self._texts = [v for v in text.split("\x00") if v] or [""]
+        else:
+            self._texts = [text]
+
         log.debug("TextFrame text: %s" % self.text)
 
     def render(self):
         self._initEncoding()
+        if (self.header is not None and self.header.minor_version < 4 and
+                len(self._texts) > 1):
+            # ID3 versions before 2.4 do not support multiple values in text
+            # frames. The common convention is to join the values with "/".
+            text = "/".join(self._texts)
+        else:
+            text = "\x00".join(self._texts)
         self.data = (self.encoding +
-                     self.text.encode(id3EncodingToString(self.encoding)))
+                     text.encode(id3EncodingToString(self.encoding)))
         if type(self.data) is not bytes:
             raise ValueError("Frame date not bytes type")
         return super().render()

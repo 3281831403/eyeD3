@@ -7,6 +7,7 @@ import eyed3.core
 import eyed3.plugins
 import eyed3.id3.tag
 import eyed3.id3.headers
+import eyed3.id3.frames
 
 from eyed3.utils.log import getLogger
 
@@ -52,7 +53,11 @@ def audioFileToJson(audio_file):
             continue
 
         if isinstance(member, (str, int, bool)):
-            tdict[name] = member
+            if isinstance(member, str) and name in _text_frame_fids:
+                texts = _textFrameValues(tag, name)
+                tdict[name] = texts if len(texts) > 1 else member
+            else:
+                tdict[name] = member
         elif isinstance(member, eyed3.core.Date):
             tdict[name] = str(member)
         elif isinstance(member, eyed3.id3.Genre):
@@ -76,6 +81,30 @@ def audioFileToJson(audio_file):
 
     tdict["_eyeD3"] = eyed3.__about__.__version__
     return tdict
+
+
+def _textFrameValues(tag, name):
+    """Return the list of values for the text frame backing ``name``.
+
+    ``name`` is one of the keys in ``_text_frame_fids``. Text frames are
+    stored one-per-id so the first frame is used."""
+    frames = tag.frame_set[_text_frame_fids[name]]
+    if not frames:
+        return []
+    return frames[0].texts
+
+
+# Tag member names backed by a single text frame. These are the fields that
+# may contain multiple, null separated, values in ID3 v2.4.
+_text_frame_fids = {
+    "album": eyed3.id3.frames.ALBUM_FID,
+    "album_artist": eyed3.id3.frames.ALBUM_ARTIST_FID,
+    "artist": eyed3.id3.frames.ARTIST_FID,
+    "original_artist": eyed3.id3.frames.ORIG_ARTIST_FID,
+    "composer": eyed3.id3.frames.COMPOSER_FID,
+    "publisher": eyed3.id3.frames.PUBLISHER_FID,
+    "title": eyed3.id3.frames.TITLE_FID,
+}
 
 
 _tag_map = {
