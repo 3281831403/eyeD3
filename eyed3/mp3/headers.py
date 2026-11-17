@@ -101,17 +101,15 @@ def findHeader(fp, start_pos=0):
     return None, None, None
 
 
-def timePerFrame(mp3_header, vbr):
+def timePerFrame(mp3_header, vbr=False):
     """Computes the number of seconds per mp3 frame. It can be used to
-    compute overall playtime and bitrate. The mp3 layer and sample
+    compute overall playtime and bitrate. The mp3 layer, version, and sample
     rate from ``mp3_header`` are used to compute the number of seconds
-    (fractional float point value) per mp3 frame. Be sure to set ``vbr`` True
-    when dealing with VBR, otherwise playtimes may be incorrect."""
+    (fractional float point value) per mp3 frame. The number of samples per
+    frame depends only on the MPEG version and layer, so the ``vbr`` argument
+    is ignored and retained for backwards compatibility."""
     # https://bitbucket.org/nicfit/eyed3/issue/32/mp3audioinfotime_secs-incorrect-for-mpeg2
-    if mp3_header.version >= 2.0 and vbr:
-        row = _mp3VersionKey(mp3_header.version)
-    else:
-        row = 0
+    row = _mp3VersionKey(mp3_header.version)
     return (float(SAMPLES_PER_FRAME_TABLE[row][mp3_header.layer]) /
             float(mp3_header.sample_freq))
 
@@ -241,8 +239,14 @@ class Mp3Header:
             # Layer 1 uses 32 bit slots for padding.
             p = self.padding * 4
             self.frame_length = int((((12 * br) / sf) + p) * 4)
+        elif self.layer == 3 and self.version != 1.0:
+            # MPEG-2 and MPEG-2.5 Layer III frames carry 576 samples and
+            # use a coefficient of 72 instead of the 144 used by Layer II
+            # and MPEG-1 Layer III.
+            p = self.padding * 1
+            self.frame_length = int(((72 * br) / sf) + p)
         else:
-            # Layer 2 and 3 uses 8 bit slots for padding.
+            # Layer 2 and MPEG-1 Layer III use 8 bit slots for padding.
             p = self.padding * 1
             self.frame_length = int(((144 * br) / sf) + p)
 
@@ -276,7 +280,7 @@ class VbriHeader(object):
         # therefore 4 + 32 = 36
         offset = 36
         head = frame[offset:offset + 4]
-        if head != 'VBRI':
+        if head != b'VBRI':
             return False
         log.debug("VBRI header detected @ %x" % (offset))
         offset += 4
@@ -864,3 +868,49 @@ def _mp3VersionKey(version):
         raise ValueError(f"Invalid mp3 version key value: {key}")
 
     return key
+
+
+def walkMp3Frames(fp, first_header, audio_start, audio_end):
+    """Walk the MPEG audio frames in the byte range
+    ``[audio_start, audio_end)`` of file stream ``fp`` without buffering more
+    than a frame header at a time.
+
+    ``first_header`` is the :class:`Mp3Header` decoded at ``audio_start``;
+    each frame's own length (bit rate and padding may vary) is used to find
+    the next frame sync.
+
+    Yields ``(frame_offset, header)`` for every frame whose header is valid
+    and shares the version, layer, and sample frequency of the first frame.
+    Iteration stops at the first invalid header, a truncated final frame, or
+    once ``audio_end`` is reached.
+    """
+    offset = audio_start
+    while offset + 4 <= audio_end:
+        fp.seek(offset)
+        header_bytes = fp.read(4)
+        if len(header_bytes) < 4:
+            break
+
+        header_int = bytes2dec(header_bytes)
+        if not isValidHeader(header_int):
+            log.debug("Frame walk stopped by invalid header @ 0x%x" % offset)
+            break
+
+        try:
+            header = Mp3Header(header_int)
+        except Mp3Exception as ex:
+            log.debug("Frame walk stopped: %s" % str(ex))
+            break
+
+        if (header.version != first_header.version or
+                header.layer != first_header.layer or
+                header.sample_freq != first_header.sample_freq):
+            log.debug("Frame walk stopped by header mismatch @ 0x%x" % offset)
+            break
+
+        yield (offset, header)
+
+        if offset + header.frame_length > audio_end:
+            # The final frame is truncated; it was still counted above.
+            break
+        offset += header.frame_length

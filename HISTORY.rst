@@ -3,6 +3,21 @@ Release History
 
 .. :changelog:
 
+v0.9.9 (unreleased)
+-------------------
+
+Fix
+~~~
+* MP3 audio info reliability: Xing/Info/VBRI header frame and byte counts
+  are now authoritative (Info = CBR, Xing/VBRI = VBR); files without a VBR
+  header are scanned frame by frame to detect VBR and compute the average
+  bit rate while pure CBR files keep the O(1) estimate. MPEG-2/2.5 Layer III
+  frame lengths (72 coefficient) and samples-per-frame (576) are now
+  correct. ID3 v2 prefixes and v1 trailer bytes are excluded from audio
+  measurements, VBRI headers are detected again, and the classic plugin
+  prints MPEG 2.5 rather than MPEG 2.
+
+
 v0.9.8 (2025-04-26) : Armed & Dangerous
 ---------------------------------------
 

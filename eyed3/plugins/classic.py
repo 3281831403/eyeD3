@@ -530,10 +530,12 @@ optional. For example, 2012-03 is valid, 2012--12 is not.
 
     def printAudioInfo(self, info):
         if isinstance(info, mp3.Mp3AudioInfo):
+            version = info.mp3_header.version
+            version_str = "%g" % version
             printMsg(boldText("Time: ") +
-                     "%s\tMPEG%d, Layer %s\t[ %s @ %s Hz - %s ]" %
+                     "%s\tMPEG%s, Layer %s\t[ %s @ %s Hz - %s ]" %
                      (formatTime(info.time_secs),
-                      info.mp3_header.version,
+                      version_str,
                       "I" * info.mp3_header.layer,
                       info.bit_rate_str,
                       info.mp3_header.sample_freq, info.mp3_header.mode))
